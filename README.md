@@ -49,8 +49,8 @@ sem passo manual.
 ```
 
 Regra de ouro: **o que é "do Docker" mora em `vetlab-infra/`** e **o material de
-leitura mora em `artigos/`**; a raiz do repositório guarda apenas o README e os
-arquivos de controle de versão.
+leitura mora em `artigos/`**; a raiz do repositório guarda apenas o README, os
+arquivos de controle de versão e o acervo.
 
 ---
 
