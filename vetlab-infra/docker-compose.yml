@@ -1,0 +1,166 @@
+# ---------------------------------------------------------------------------
+# VET-Lab — infraestrutura local do Programa 1 (Modelos e Moléculas).
+#
+# Serviços:
+#   postgres   -> PostgreSQL 18 + extensões        (host 5432, acesso admin)
+#   pgbouncer  -> pool transacional                (host 6432, acesso da app)
+#   pgadmin    -> interface web                    (host 5050)
+#
+# Estado persistente em volumes nomeados (pgdata, pglab_certs, pgadmin_data):
+# bind mount de dados do PostgreSQL/ pgAdmin em Windows/macOS não preserva
+# permissões POSIX e quebra o initdb. Ver docs/decisions/0001-*.md.
+# ---------------------------------------------------------------------------
+name: vetlab-infra
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        POSTGRES_MAJOR: ${POSTGRES_MAJOR:-18}
+    image: vetlab/postgres:${POSTGRES_MAJOR:-18}
+    container_name: postgres-vetlab
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---encoding=UTF8 --locale=C.UTF-8 --data-checksums}
+      # Contrato consumido por init-scripts/00-bootstrap.sh
+      SVC_DB_NAME: ${SVC_DB_NAME:-vetlab_db}
+      SVC_DB_USER: ${SVC_DB_USER:-svc_app}
+      SVC_DB_PASSWORD: ${SVC_DB_PASSWORD:?defina SVC_DB_PASSWORD no .env}
+      SVC_DB_READONLY_USER: ${SVC_DB_READONLY_USER:-svc_readonly}
+      SVC_DB_READONLY_PASSWORD: ${SVC_DB_READONLY_PASSWORD:?defina SVC_DB_READONLY_PASSWORD no .env}
+      # Consumido por docker/postgres/docker-entrypoint-ssl.sh
+      POSTGRES_SSL_SUBJECT: ${POSTGRES_SSL_SUBJECT:-/CN=localhost}
+      POSTGRES_SSL_SAN: ${POSTGRES_SSL_SAN:-DNS:localhost,DNS:postgres,DNS:pgbouncer,IP:127.0.0.1}
+      POSTGRES_SSL_DAYS: ${POSTGRES_SSL_DAYS:-3650}
+      # Consumido por pg-backup
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      TZ: ${TZ:-America/Sao_Paulo}
+      PGTZ: ${TZ:-America/Sao_Paulo}
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PG18+ espera o volume em /var/lib/postgresql (PGDATA interno é
+      # /var/lib/postgresql/18/docker). Montar em .../data quebra o entrypoint.
+      - pgdata:/var/lib/postgresql
+      - pglab_certs:/etc/postgresql/certs
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./data/backups:/backups
+    networks:
+      - networkbase
+    mem_reservation: 768m
+    mem_limit: 1536m
+    shm_size: 512m
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1 -p 5432 || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.25.2-20260920
+    container_name: pgbouncer-vetlab
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Wrapper gera /etc/pgbouncer/userlist.txt a partir do ambiente antes de
+    # subir o binário (a imagem oficial não faz isso).
+    entrypoint: ["/bin/sh", "/usr/local/bin/pgbouncer-entrypoint.sh"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      SVC_DB_USER: ${SVC_DB_USER:-svc_app}
+      SVC_DB_PASSWORD: ${SVC_DB_PASSWORD:?defina SVC_DB_PASSWORD no .env}
+      SVC_DB_READONLY_USER: ${SVC_DB_READONLY_USER:-svc_readonly}
+      SVC_DB_READONLY_PASSWORD: ${SVC_DB_READONLY_PASSWORD:?defina SVC_DB_READONLY_PASSWORD no .env}
+      PGBOUNCER_AUTH_FILE: /etc/pgbouncer/userlist.txt
+      PGBOUNCER_CONFIG: /etc/pgbouncer/pgbouncer.ini
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - "127.0.0.1:${PGBOUNCER_PORT:-6432}:6432"
+    volumes:
+      - ./docker/pgbouncer/entrypoint.sh:/usr/local/bin/pgbouncer-entrypoint.sh:ro
+      - ./config/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    networks:
+      - networkbase
+    mem_reservation: 48m
+    mem_limit: 128m
+    cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /tmp/.s.PGSQL.6432 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  pgadmin:
+    image: dpage/pgadmin4:9.17
+    container_name: pgadmin-vetlab
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@localhost.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?defina PGADMIN_DEFAULT_PASSWORD no .env}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+      PGADMIN_CONFIG_ENABLE_PSQL: "True"
+      PGADMIN_CONFIG_MAX_QUERY_HIST_STORED: 500
+      PGADMIN_CONFIG_ALLOW_SAVE_PASSWORD: "True"
+      PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 20
+      PGADMIN_DISABLE_POSTFIX: "True"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+      PGADMIN_LISTEN_ADDRESS: 0.0.0.0
+      PGADMIN_LISTEN_PORT: 80
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      # Servidores pré-cadastrados (lido a cada start por REPLACE_SERVERS_ON_STARTUP).
+      - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - networkbase
+    mem_reservation: 256m
+    mem_limit: 512m
+    cpus: "0.5"
+    logging: *default-logging
+
+networks:
+  networkbase:
+    driver: bridge
+
+volumes:
+  pgdata:
+  pglab_certs:
+  pgadmin_data:

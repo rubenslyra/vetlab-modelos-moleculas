@@ -1,0 +1,15 @@
+# Normaliza LF para tudo que é lido por shell/SQL/YAML dentro do Linux.
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
+*.ini text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.dump binary
+*.pdf binary
+*.png binary
+*.jpg binary

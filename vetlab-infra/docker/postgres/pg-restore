@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# pg-restore — restauração de um backup gerado por pg-backup.
+#
+# Uso (dentro do contêiner postgres, como usuário postgres):
+#   docker compose exec -u postgres postgres pg-restore <arquivo.dump> [banco] [--yes]
+#
+# ATENÇÃO: usa --clean --if-exists, ou seja, DERRUBA os objetos existentes do
+# banco de destino antes de recriá-los.
+set -Eeuo pipefail
+
+BACKUP_FILE="${1:-}"
+TARGET_DB="${2:-${SVC_DB_NAME:-vetlab_db}}"
+ASSUME_YES="${3:-}"
+
+log() { printf '[pg-restore] %s\n' "$*" >&2; }
+usage() {
+    printf 'uso: pg-restore <arquivo.dump> [banco] [--yes]\n' >&2
+    exit 2
+}
+
+[[ -n "$BACKUP_FILE" ]] || usage
+[[ -f "$BACKUP_FILE" ]] || { log "ERRO: arquivo não encontrado: ${BACKUP_FILE}"; exit 1; }
+[[ "$ASSUME_YES" == "--yes" ]] || [[ "$ASSUME_YES" == "" ]] || usage
+
+if [[ "$ASSUME_YES" != "--yes" ]]; then
+    if [[ -t 0 ]]; then
+        printf '[pg-restore] Isto vai SUBSTITUIR os objetos de "%s". Continuar? [s/N] ' "$TARGET_DB" >&2
+        read -r answer
+        case "$answer" in
+            s | S | y | Y) ;;
+            *) log "cancelado"; exit 1 ;;
+        esac
+    else
+        log "ERRO: sem TTY interativo; repita com --yes para confirmar"
+        exit 1
+    fi
+fi
+
+log "restaurando ${BACKUP_FILE} em '${TARGET_DB}'"
+pg_restore --clean --if-exists --no-owner --dbname="$TARGET_DB" "$BACKUP_FILE"
+log "restauração concluída"

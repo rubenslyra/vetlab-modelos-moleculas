@@ -1,0 +1,24 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "VET-Lab · App (PgBouncer)",
+      "Group": "VET-Lab",
+      "Host": "pgbouncer",
+      "Port": 6432,
+      "MaintenanceDB": "vetlab_db",
+      "Username": "svc_app",
+      "SSLMode": "prefer",
+      "Comment": "Caminho da aplicação: pool transacional em 6432. Senha: SVC_DB_PASSWORD."
+    },
+    "2": {
+      "Name": "VET-Lab · Admin (PostgreSQL)",
+      "Group": "VET-Lab",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "postgres",
+      "SSLMode": "prefer",
+      "Comment": "Acesso administrativo direto, sem pooler. Senha: POSTGRES_PASSWORD."
+    }
+  }
+}

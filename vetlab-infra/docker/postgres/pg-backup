@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# pg-backup — backup lógico consistente do VET-Lab.
+#
+# Uso (dentro do contêiner postgres, como usuário postgres):
+#   docker compose exec -u postgres postgres pg-backup [banco]
+#
+# Gera em /backups (bind mount ./data/backups):
+#   <banco>_<UTC>.dump   -> pg_dump formato custom (comprimido)
+#   vetlab_globals_<UTC>.sql -> pg_dumpall --globals-only (roles e grants de cluster)
+# Aplica retenção de BACKUP_RETENTION_DAYS dias (padrão: 7).
+set -Eeuo pipefail
+
+BACKUP_DIR="${BACKUP_DIR:-/backups}"
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+TARGET_DB="${1:-${SVC_DB_NAME:-vetlab_db}}"
+
+log() { printf '[pg-backup] %s\n' "$*" >&2; }
+
+if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+    log "ERRO: BACKUP_RETENTION_DAYS deve ser inteiro positivo (recebido: '${RETENTION_DAYS}')"
+    exit 2
+fi
+
+mkdir -p "$BACKUP_DIR"
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+dump_file="${BACKUP_DIR}/${TARGET_DB}_${stamp}.dump"
+globals_file="${BACKUP_DIR}/vetlab_globals_${stamp}.sql"
+
+log "dump de '${TARGET_DB}' -> ${dump_file}"
+pg_dump --format=custom --compress=zstd:3 --dbname="$TARGET_DB" --file="$dump_file"
+
+# Valida o arquivo gerado antes de considerar o backup bem-sucedido.
+pg_restore --list "$dump_file" >/dev/null
+log "dump validado (pg_restore --list)"
+
+log "dump de globals (roles/grants) -> ${globals_file}"
+pg_dumpall --globals-only --no-role-passwords --file="$globals_file"
+
+log "aplicando retenção de ${RETENTION_DAYS} dia(s) em ${BACKUP_DIR}"
+find "$BACKUP_DIR" -maxdepth 1 -type f \
+    \( -name '*_*.dump' -o -name 'vetlab_globals_*.sql' \) \
+    -mtime +"$RETENTION_DAYS" -print -delete
+
+log "backup concluído"

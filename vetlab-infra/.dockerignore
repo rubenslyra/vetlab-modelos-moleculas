@@ -1,0 +1,8 @@
+# Build context mínimo: só o que o Dockerfile realmente copia.
+# init-scripts/ e config/ são montados em runtime (volumes), não fazem parte da
+# imagem — e .env/CREDENTIALS.md jamais devem entrar no contexto de build.
+**
+!Dockerfile
+!docker/
+!docker/postgres/
+!docker/postgres/**

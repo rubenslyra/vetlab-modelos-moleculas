@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# Segredos e configuração local (padrões sem âncora: valem em qualquer nível)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+CREDENTIALS.md
+
+# ---------------------------------------------------------------------------
+# Dados de runtime do compose (backups e marcadores são preservados)
+# Padrões usam `**` porque regra com "/" é ancorada no diretório do .gitignore
+# e os artefatos vivem em vetlab-infra/data/.
+# ---------------------------------------------------------------------------
+**/data/**
+!**/data/.gitkeep
+!**/data/backups/
+!**/data/backups/.gitkeep
+database/
+logs/
+*.log
+
+# Artefatos de banco
+*.sql.gz
+*.dump
+*.backup
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
